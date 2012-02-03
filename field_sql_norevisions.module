@@ -682,22 +682,3 @@ function field_sql_norevisions_field_storage_details($field) {
     );
   }
 }
-
-/**
- * Implements hook_field_info_alter().
- */
-function field_sql_norevisions_field_info_alter(&$field_info) {
-
-  $field_info['text_long']['storage'] = array(
-    'type' => 'field_sql_norevisions', 
-    'settings' => array(),
-  );
-  dpm($field_info);
-}
-
-/**
- * Implements hook_field_info_alter().
- */
-function field_sql_norevisions_field_storage_info_alter(&$field_info) {
-  dpm($field_info);
-}
