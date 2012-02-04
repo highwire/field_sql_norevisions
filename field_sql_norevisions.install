@@ -4,3 +4,29 @@
  * @file
  * Install, update and uninstall functions for the field_sql_norevision module.
  */
+
+/**
+ * Implements hook_install().
+ */
+function field_sql_norevisions_install() {
+  variable_set('field_storage_default', 'field_sql_norevisions');
+}
+
+/**
+ * Implements hook_schema().
+ */
+function field_sql_norevisions_schema() {
+  $schema = array();
+
+  // Dynamic (data) tables.
+  if (db_table_exists('field_config')) {
+    $fields = field_read_fields(array(), array('include_deleted' => TRUE, 'include_inactive' => TRUE));
+    drupal_load('module', 'field_sql_norevisions');
+    foreach ($fields as $field) {
+      if ($field['storage']['type'] == 'field_sql_norevisions') {
+        $schema += _field_sql_storage_schema($field);
+      }
+    }
+  }
+  return $schema;
+}
