@@ -477,10 +477,14 @@ function field_sql_norevisions_field_storage_query(EntityFieldQuery $query) {
 
   // Add field conditions. We need a fresh grouping cache.
   drupal_static_reset('_field_sql_norevisions_query_field_conditions');
-  _field_sql_norevisions_query_field_conditions($query, $select_query, $query->fieldConditions, $table_aliases, '_field_sql_norevisions_columnname');
+  if (isset($query->fieldConditions)) {
+    _field_sql_norevisions_query_field_conditions($query, $select_query, $query->fieldConditions, $table_aliases, '_field_sql_norevisions_columnname');
+  }
 
   // Add field meta conditions.
-  _field_sql_norevisions_query_field_conditions($query, $select_query, $query->fieldMetaConditions, $table_aliases, '_field_sql_norevisions_query_columnname');
+  if (isset($query->fieldMetaConditions)) {
+    _field_sql_norevisions_query_field_conditions($query, $select_query, $query->fieldMetaConditions, $table_aliases, '_field_sql_norevisions_query_columnname');
+  }
 
   if (isset($query->deleted)) {
     $select_query->condition("$field_base_table.deleted", (int) $query->deleted);
