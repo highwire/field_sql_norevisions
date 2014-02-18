@@ -10,7 +10,7 @@
  */
 function field_sql_norevisions_install() {
   variable_set('field_storage_default', 'field_sql_norevisions');
-  
+
   // If the module is enabled after the first call to _field_info_collate_types
   // the functions static cache will be need to be reset.
   _field_info_collate_types(TRUE);
@@ -28,7 +28,7 @@ function field_sql_norevisions_schema() {
     drupal_load('module', 'field_sql_norevisions');
     foreach ($fields as $field) {
       if ($field['storage']['type'] == 'field_sql_norevisions') {
-        $schema += _field_sql_norevisions_schema($field);
+        $schema += _field_sql_storage_schema($field);
       }
     }
   }

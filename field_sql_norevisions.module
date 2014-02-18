@@ -19,6 +19,179 @@ function field_sql_norevisions_help($path, $arg) {
 }
 
 /**
+ * Implements hook_menu()
+ */
+function field_sql_norevisions_menu() {
+  $items = array();
+
+  $items['admin/config/system/field_sql_norevisions'] = array(
+    'title' => 'Field sql norevisions',
+    'description' => 'Adjust Field SQL Norevisions settings.',
+    'page callback' => 'system_admin_menu_block_page',
+    'access arguments' => array('administer site configuration'),
+    'position' => 'left',
+    'file' => 'system.admin.inc',
+    'file path' => 'modules/system/',
+  );
+
+  $items['admin/config/system/field_sql_norevisions/field_sql_norevisions_entity_settings'] = array(
+    'title' => 'Field SQL Norevisions Entity Settings settings',
+    'description' => 'Enable or disable field norevisions for entities/bundles',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('field_sql_norevisions_entity_settings_form'),
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['admin/config/system/field_sql_norevisions/field_sql_norevisions_batch_delete'] = array(
+    'title' => 'Field SQL Norevisions Batch Delete',
+    'description' => 'Delete revisions for entities',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('field_sql_norevisions_batch_delete_form'),
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  return $items;
+}
+
+/**
+ * Form callback for batch deletion of revisions
+ */
+function field_sql_norevisions_batch_delete_form($form, &$form_state) {
+  $form = array();
+
+  $entity_info = entity_get_info();
+
+  $defaults = variable_get('field_sql_norevisions_enabled_entities', array());
+
+  foreach ($entity_info as $entity_name => $entity) {
+    //First we check if it's fieldable, we don't care about it if it's not
+    if(!$entity['fieldable']) continue;
+
+    $form['field_sql_norevisions_' . $entity_name .'_wrapper'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Delete revisions for <strong>'.$entity['label'].'</strong> entity bundles'),
+      '#collapsible' => TRUE,
+      '#collapsed' => FALSE,
+    );
+
+    foreach ($entity['bundles'] as $bundle_name => $bundle) {
+      $form['field_sql_norevisions_' . $entity_name .'_wrapper']['field_sql_norevisions_'.$entity_name.'_'.$bundle_name.'_delete'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Delete '. $bundle['label'] . ' revisions.'),
+      );
+    }
+  }
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Delete'),
+  );
+
+  return $form;
+}
+
+function field_sql_norevisions_batch_delete_form_submit($form, &$form_state) {
+  $batch = array();
+  $batch['finished'] = 'field_sql_norevisions_batch_revision_delete_finish';
+
+  $entity_info = entity_get_info();
+
+  foreach ($entity_info as $entity_name => $entity) {
+    foreach ($entity['bundles'] as $bundle => $bundle_settings) {
+      if(!empty($form_state['values']['field_sql_norevisions_'.$entity_name.'_'.$bundle.'_delete'])) {
+        $fields = field_info_instances($entity_name, $bundle);
+        foreach ($fields as $field) {
+          $field_info = field_info_field($field['field_name']);
+          if($revisions_table = _field_sql_storage_revision_tablename($field_info)) {
+            $batch['operations'][] = array('field_sql_norevisions_batch_delete_revisions', array($revisions_table, $bundle));
+          }
+        }
+      }
+    }
+  }
+
+  if(!empty($batch['operations'])) {
+    batch_set($batch);
+  } else {
+    drupal_set_message("No entities selected, no revisions deleted.");
+  }
+
+}
+
+
+/**
+ * Batch revision delete callback
+ */
+function field_sql_norevisions_batch_delete_revisions($field, $bundle, &$context) {
+   db_delete($field)
+            ->condition('bundle', $bundle)
+            ->execute();
+}
+
+
+/**
+ * Form callback admin/config/system/field_sql_norevisions
+ *
+ * Settings form that will get all entities and bundles (if supported) and allow you to enable of disable revisions
+ */
+function field_sql_norevisions_entity_settings_form($form, &$form_state) {
+  $form = array();
+
+  $form['markup'] = array(
+    '#markup' => t('<strong>Please NOTE that if any of your entity bundles are sharing fields, it is required that both entities/bundles have no revisions.</strong>'),
+  );
+
+  $entity_info = entity_get_info();
+
+  $defaults = variable_get('field_sql_norevisions_enabled_entities', array());
+
+  foreach ($entity_info as $entity_name => $entity) {
+    //First we check if it's fieldable, we don't care about it if it's not
+    if(!$entity['fieldable']) continue;
+
+    $form['field_sql_norevisions_' . $entity_name .'_wrapper'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Disable SQL revisions for <strong>'.$entity['label'].'</strong> entity bundles'),
+      '#collapsible' => TRUE,
+      '#collapsed' => FALSE,
+      '#tree' => TRUE,
+    );
+
+    foreach ($entity['bundles'] as $bundle_name => $bundle) {
+      $form['field_sql_norevisions_' . $entity_name .'_wrapper']['field_sql_norevisions_'.$entity_name.'_'.$bundle_name.'_enabled'] = array(
+        '#type' => 'checkbox',
+        '#title' => t($bundle['label']),
+        '#default_value' => isset($defaults['field_sql_norevisions_'.$entity_name.'_'.$bundle_name.'_enabled']) ? $defaults['field_sql_norevisions_'.$entity_name.'_'.$bundle_name.'_enabled'] : '',
+      );
+    }
+
+  }
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Save'),
+  );
+
+  return $form;
+}
+
+function field_sql_norevisions_entity_settings_form_submit($form, &$form_state) {
+  $entity_info = entity_get_info();
+  $save = array();
+
+  foreach ($entity_info as $entity_name => $entity) {
+    if(isset($form_state['values']['field_sql_norevisions_' . $entity_name .'_wrapper'])) {
+      $save = array_merge($save, $form_state['values']['field_sql_norevisions_' . $entity_name .'_wrapper']);
+    }
+  }
+
+  variable_set('field_sql_norevisions_enabled_entities', $save);
+}
+
+
+/**
  * Implements hook_field_storage_info().
  */
 function field_sql_norevisions_field_storage_info() {
@@ -30,166 +203,13 @@ function field_sql_norevisions_field_storage_info() {
   );
 }
 
-/**
- * Generate a table name for a field data table.
- *
- * @param $field
- *   The field structure.
- * @return
- *   A string containing the generated name for the database table
- */
-function _field_sql_norevisions_tablename($field) {
-  if ($field['deleted']) {
-    return "field_deleted_data_{$field['id']}";
-  }
-  else {
-    return "field_data_{$field['field_name']}";
-  }
-}
-
-function _field_sql_norevisions_revision_tablename($field) {
-  return _field_sql_norevisions_tablename($field);
-}
-
-/**
- * Generate a column name for a field data table.
- *
- * @param $name
- *   The name of the field
- * @param $column
- *   The name of the column
- * @return
- *   A string containing a generated column name for a field data
- *   table that is unique among all other fields.
- */
-function _field_sql_norevisions_columnname($name, $column) {
-  return $name . '_' . $column;
-}
-
-/**
- * Generate an index name for a field data table.
- *
- * @param $name
- *   The name of the field
- * @param $column
- *   The name of the index
- * @return
- *   A string containing a generated index name for a field data
- *   table that is unique among all other fields.
- */
-function _field_sql_norevisions_indexname($name, $index) {
-  return $name . '_' . $index;
-}
-
-/**
- * Return the database schema for a field. This may contain one or
- * more tables. Each table will contain the columns relevant for the
- * specified field. Leave the $field's 'columns' and 'indexes' keys
- * empty to get only the base schema.
- *
- * @param $field
- *   The field structure for which to generate a database schema.
- * @return
- *   One or more tables representing the schema for the field.
- */
-function _field_sql_norevisions_schema($field) {
-  $deleted = $field['deleted'] ? 'deleted ' : '';
-  $current = array(
-    'description' => "Data storage for {$deleted}field {$field['id']} ({$field['field_name']})",
-    'fields' => array(
-      'entity_type' => array(
-        'type' => 'varchar',
-        'length' => 128,
-        'not null' => TRUE,
-        'default' => '',
-        'description' => 'The entity type this data is attached to',
-      ),
-      'bundle' => array(
-        'type' => 'varchar',
-        'length' => 128,
-        'not null' => TRUE,
-        'default' => '',
-        'description' => 'The field instance bundle to which this row belongs, used when deleting a field instance',
-      ),
-      'deleted' => array(
-        'type' => 'int',
-        'size' => 'tiny',
-        'not null' => TRUE,
-        'default' => 0,
-        'description' => 'A boolean indicating whether this data item has been deleted'
-      ),
-      'entity_id' => array(
-        'type' => 'int',
-        'unsigned' => TRUE,
-        'not null' => TRUE,
-        'description' => 'The entity id this data is attached to',
-      ),
-      'revision_id' => array(
-        'type' => 'int',
-        'unsigned' => TRUE,
-        'not null' => FALSE,
-        'description' => 'The entity revision id this data is attached to, or NULL if the entity type is not versioned',
-      ),
-      // @todo Consider storing language as integer.
-      'language' => array(
-        'type' => 'varchar',
-        'length' => 32,
-        'not null' => TRUE,
-        'default' => '',
-        'description' => 'The language for this data item.',
-      ),
-      'delta' => array(
-        'type' => 'int',
-        'unsigned' => TRUE,
-        'not null' => TRUE,
-        'description' => 'The sequence number for this data item, used for multi-value fields',
-      ),
-    ),
-    'primary key' => array('entity_type', 'entity_id', 'deleted', 'delta', 'language'),
-    'indexes' => array(
-      'entity_type' => array('entity_type'),
-      'bundle' => array('bundle'),
-      'deleted' => array('deleted'),
-      'entity_id' => array('entity_id'),
-      'revision_id' => array('revision_id'),
-      'language' => array('language'),
-    ),
-  );
-
-  $field += array('columns' => array(), 'indexes' => array(), 'foreign keys' => array());
-  // Add field columns.
-  foreach ($field['columns'] as $column_name => $attributes) {
-    $real_name = _field_sql_norevisions_columnname($field['field_name'], $column_name);
-    $current['fields'][$real_name] = $attributes;
-  }
-
-  // Add indexes.
-  foreach ($field['indexes'] as $index_name => $columns) {
-    $real_name = _field_sql_norevisions_indexname($field['field_name'], $index_name);
-    foreach ($columns as $column_name) {
-      $current['indexes'][$real_name][] = _field_sql_norevisions_columnname($field['field_name'], $column_name);
-    }
-  }
-
-  // Add foreign keys.
-  foreach ($field['foreign keys'] as $specifier => $specification) {
-    $real_name = _field_sql_norevisions_indexname($field['field_name'], $specifier);
-    $current['foreign keys'][$real_name]['table'] = $specification['table'];
-    foreach ($specification['columns'] as $column => $referenced) {
-      $sql_storage_column = _field_sql_norevisions_columnname($field['field_name'], $column_name);
-      $current['foreign keys'][$real_name]['columns'][$sql_storage_column] = $referenced;
-    }
-  }
-  return array(
-    _field_sql_norevisions_tablename($field) => $current,
-  );
-}
 
 /**
  * Implements hook_field_storage_create_field().
  */
 function field_sql_norevisions_field_storage_create_field($field) {
-  $schema = _field_sql_norevisions_schema($field);
+  //Still create the revision table so you can turn it on off.
+  $schema = _field_sql_storage_schema($field);
   foreach ($schema as $name => $table) {
     db_create_table($name, $table);
   }
@@ -212,8 +232,8 @@ function field_sql_norevisions_field_update_forbid($field, $prior_field, $has_da
  * Implements hook_field_storage_update_field().
  */
 function field_sql_norevisions_field_storage_update_field($field, $prior_field, $has_data) {
+  // There is no data. Re-create the tables completely.
   if (! $has_data) {
-    // There is no data. Re-create the tables completely.
 
     if (Database::getConnection()->supportsTransactionalDDL()) {
       // If the database supports transactional DDL, we can go ahead and rely
@@ -222,11 +242,11 @@ function field_sql_norevisions_field_storage_update_field($field, $prior_field, 
     }
 
     try {
-      $prior_schema = _field_sql_norevisions_schema($prior_field);
+      $prior_schema = _field_sql_storage_schema($prior_field);
       foreach ($prior_schema as $name => $table) {
         db_drop_table($name, $table);
       }
-      $schema = _field_sql_norevisions_schema($field);
+      $schema = _field_sql_storage_schema($field);
       foreach ($schema as $name => $table) {
         db_create_table($name, $table);
       }
@@ -237,7 +257,7 @@ function field_sql_norevisions_field_storage_update_field($field, $prior_field, 
       }
       else {
         // Recreate tables.
-        $prior_schema = _field_sql_norevisions_schema($prior_field);
+        $prior_schema = _field_sql_storage_schema($prior_field);
         foreach ($prior_schema as $name => $table) {
           if (!db_table_exists($name)) {
             db_create_table($name, $table);
@@ -251,20 +271,20 @@ function field_sql_norevisions_field_storage_update_field($field, $prior_field, 
     // There is data, so there are no column changes. Drop all the
     // prior indexes and create all the new ones, except for all the
     // priors that exist unchanged.
-    $table = _field_sql_norevisions_tablename($prior_field);
+    $table = _field_sql_storage_tablename($prior_field);
     foreach ($prior_field['indexes'] as $name => $columns) {
       if (!isset($field['indexes'][$name]) || $columns != $field['indexes'][$name]) {
-        $real_name = _field_sql_norevisions_indexname($field['field_name'], $name);
+        $real_name = _field_sql_storage_indexname($field['field_name'], $name);
         db_drop_index($table, $real_name);
       }
     }
-    $table = _field_sql_norevisions_tablename($field);
+    $table = _field_sql_storage_tablename($field);
     foreach ($field['indexes'] as $name => $columns) {
       if (!isset($prior_field['indexes'][$name]) || $columns != $prior_field['indexes'][$name]) {
-        $real_name = _field_sql_norevisions_indexname($field['field_name'], $name);
+        $real_name = _field_sql_storage_indexname($field['field_name'], $name);
         $real_columns = array();
         foreach ($columns as $column_name) {
-          $real_columns[] = _field_sql_norevisions_columnname($field['field_name'], $column_name);
+          $real_columns[] = _field_sql_storage_columnname($field['field_name'], $column_name);
         }
         db_add_index($table, $real_name, $real_columns);
       }
@@ -279,14 +299,14 @@ function field_sql_norevisions_field_storage_update_field($field, $prior_field, 
 function field_sql_norevisions_field_storage_delete_field($field) {
   // Mark all data associated with the field for deletion.
   $field['deleted'] = 0;
-  $table = _field_sql_norevisions_tablename($field);
+  $table = _field_sql_storage_tablename($field);
   db_update($table)
     ->fields(array('deleted' => 1))
     ->execute();
 
   // Move the table to a unique name while the table contents are being deleted.
   $field['deleted'] = 1;
-  $new_table = _field_sql_norevisions_tablename($field);
+  $new_table = _field_sql_storage_tablename($field);
   db_rename_table($table, $new_table);
   drupal_get_schema(NULL, TRUE);
 }
@@ -295,12 +315,23 @@ function field_sql_norevisions_field_storage_delete_field($field) {
  * Implements hook_field_storage_load().
  */
 function field_sql_norevisions_field_storage_load($entity_type, $entities, $age, $fields, $options) {
+  //Check entity bundle settings.
+  $enabled_entity_bundles = variable_get('field_sql_norevisions_enabled_entities', array());
+  $entity_info = entity_get_info($entity_type);
+  foreach ($entities as $id => $entity) {
+    if(!$enabled_entity_bundles['field_sql_norevisions_' . $entity_type .'_' . $entity->{$entity_info['entity keys']['bundle']} . '_enabled']) {
+      //We fall back to normal SQL storage function
+      field_sql_storage_field_storage_load($entity_type, $entities, $age, $fields, $options);
+      return;
+    }
+  }
+
   $field_info = field_info_field_by_ids();
-  
+
   foreach ($fields as $field_id => $ids) {
     $field = $field_info[$field_id];
     $field_name = $field['field_name'];
-    $table = _field_sql_norevisions_tablename($field);
+    $table = _field_sql_storage_tablename($field);
 
     // If we're trying to load a revision use the array keys from the entities
     // array as these are the entity ids that we want to load
@@ -331,7 +362,7 @@ function field_sql_norevisions_field_storage_load($entity_type, $entities, $age,
         // For each column declared by the field, populate the item
         // from the prefixed database column.
         foreach ($field['columns'] as $column => $attributes) {
-          $column_name = _field_sql_norevisions_columnname($field_name, $column);
+          $column_name = _field_sql_storage_columnname($field_name, $column);
           $item[$column] = $row->$column_name;
         }
 
@@ -347,6 +378,15 @@ function field_sql_norevisions_field_storage_load($entity_type, $entities, $age,
  * Implements hook_field_storage_write().
  */
 function field_sql_norevisions_field_storage_write($entity_type, $entity, $op, $fields) {
+  $enabled_entity_bundles = variable_get('field_sql_norevisions_enabled_entities', array());
+  $entity_info = entity_get_info($entity_type);
+
+  if(empty($enabled_entity_bundles['field_sql_norevisions_' . $entity_type .'_' . $entity->{$entity_info['entity keys']['bundle']} . '_enabled'])) {
+    //We fall back to normal SQL storage function
+    field_sql_storage_field_storage_write($entity_type, $entity, $op, $fields);
+    return;
+  }
+
   list($id, $vid, $bundle) = entity_extract_ids($entity_type, $entity);
   if (!isset($vid)) {
     $vid = $id;
@@ -355,8 +395,8 @@ function field_sql_norevisions_field_storage_write($entity_type, $entity, $op, $
   foreach ($fields as $field_id) {
     $field = field_info_field_by_id($field_id);
     $field_name = $field['field_name'];
-    $table_name = _field_sql_norevisions_tablename($field);
- 
+    $table_name = _field_sql_storage_tablename($field);
+
     $all_languages = field_available_languages($entity_type, $field);
     $field_languages = array_intersect($all_languages, array_keys((array) $entity->$field_name));
 
@@ -378,7 +418,7 @@ function field_sql_norevisions_field_storage_write($entity_type, $entity, $op, $
     $do_insert = FALSE;
     $columns = array('entity_type', 'entity_id', 'revision_id', 'bundle', 'delta', 'language');
     foreach ($field['columns'] as $column => $attributes) {
-      $columns[] = _field_sql_norevisions_columnname($field_name, $column);
+      $columns[] = _field_sql_storage_columnname($field_name, $column);
     }
     $query = db_insert($table_name)->fields($columns);
 
@@ -397,7 +437,7 @@ function field_sql_norevisions_field_storage_write($entity_type, $entity, $op, $
           'language' => $langcode,
         );
         foreach ($field['columns'] as $column => $attributes) {
-          $record[_field_sql_norevisions_columnname($field_name, $column)] = isset($item[$column]) ? $item[$column] : NULL;
+          $record[_field_sql_storage_columnname($field_name, $column)] = isset($item[$column]) ? $item[$column] : NULL;
         }
         $query->values($record);
 
@@ -439,7 +479,7 @@ function field_sql_norevisions_field_storage_delete($entity_type, $entity, $fiel
 function field_sql_norevisions_field_storage_purge($entity_type, $entity, $field, $instance) {
   list($id, $vid, $bundle) = entity_extract_ids($entity_type, $entity);
 
-  $table_name = _field_sql_norevisions_tablename($field);
+  $table_name = _field_sql_storage_tablename($field);
   db_delete($table_name)
     ->condition('entity_type', $entity_type)
     ->condition('entity_id', $id)
@@ -450,7 +490,7 @@ function field_sql_norevisions_field_storage_purge($entity_type, $entity, $field
  * Implements hook_field_storage_query().
  */
 function field_sql_norevisions_field_storage_query(EntityFieldQuery $query) {
-  $tablename_function = '_field_sql_norevisions_tablename';
+  $tablename_function = '_field_sql_storage_tablename';
   $id_key = 'entity_id';
 
   $table_aliases = array();
@@ -478,7 +518,7 @@ function field_sql_norevisions_field_storage_query(EntityFieldQuery $query) {
   // Add field conditions. We need a fresh grouping cache.
   drupal_static_reset('_field_sql_norevisions_query_field_conditions');
   if (isset($query->fieldConditions)) {
-    _field_sql_norevisions_query_field_conditions($query, $select_query, $query->fieldConditions, $table_aliases, '_field_sql_norevisions_columnname');
+    _field_sql_norevisions_query_field_conditions($query, $select_query, $query->fieldConditions, $table_aliases, '_field_sql_storage_columnname');
   }
 
   // Add field meta conditions.
@@ -523,7 +563,7 @@ function field_sql_norevisions_field_storage_query(EntityFieldQuery $query) {
       $specifier = $order['specifier'];
       $field = $specifier['field'];
       $table_alias = $table_aliases[$specifier['index']];
-      $sql_field = "$table_alias." . _field_sql_norevisions_columnname($field['field_name'], $specifier['column']);
+      $sql_field = "$table_alias." . _field_sql_storage_columnname($field['field_name'], $specifier['column']);
       $select_query->orderBy($sql_field, $order['direction']);
     }
     elseif ($order['type'] == 'property') {
@@ -539,7 +579,7 @@ function field_sql_norevisions_field_storage_query(EntityFieldQuery $query) {
  *
  * @param SelectQuery $select_query
  *   A SelectQuery containing at least one table as specified by
- *   _field_sql_norevisions_tablename().
+ *   _field_sql_storage_tablename().
  * @param $entity_type
  *   The entity type for which the base table should be joined.
  * @param $field_base_table
@@ -595,12 +635,6 @@ function _field_sql_norevisions_query_field_conditions(EntityFieldQuery $query, 
   }
 }
 
-/**
- * Field meta condition column callback.
- */
-function _field_sql_norevisions_query_columnname($field_name, $column) {
-  return $column;
-}
 
 /**
  * Implements hook_field_storage_delete_revision().
@@ -618,7 +652,7 @@ function field_sql_norevisions_field_storage_delete_revision($entity_type, $enti
  */
 function field_sql_norevisions_field_storage_delete_instance($instance) {
   $field = field_info_field($instance['field_name']);
-  $table_name = _field_sql_norevisions_tablename($field);
+  $table_name = _field_sql_storage_tablename($field);
   db_update($table_name)
     ->fields(array('deleted' => 1))
     ->condition('entity_type', $instance['entity_type'])
@@ -635,7 +669,7 @@ function field_sql_norevisions_field_attach_rename_bundle($entity_type, $bundle_
   foreach ($instances as $instance) {
     $field = field_info_field_by_id($instance['field_id']);
     if ($field['storage']['type'] == 'field_sql_norevisions') {
-      $table_name = _field_sql_norevisions_tablename($field);
+      $table_name = _field_sql_storage_tablename($field);
       db_update($table_name)
         ->fields(array('bundle' => $bundle_new))
         ->condition('entity_type', $entity_type)
@@ -652,7 +686,7 @@ function field_sql_norevisions_field_attach_rename_bundle($entity_type, $bundle_
  * that is left is to delete the table.
  */
 function field_sql_norevisions_field_storage_purge_field($field) {
-  $table_name = _field_sql_norevisions_tablename($field);
+  $table_name = _field_sql_storage_tablename($field);
   db_drop_table($table_name);
 }
 
@@ -664,16 +698,16 @@ function field_sql_norevisions_field_storage_details($field) {
   if (!empty($field['columns'])) {
      // Add field columns.
     foreach ($field['columns'] as $column_name => $attributes) {
-      $real_name = _field_sql_norevisions_columnname($field['field_name'], $column_name);
+      $real_name = _field_sql_storage_columnname($field['field_name'], $column_name);
       $columns[$column_name] = $real_name;
     }
     return array(
       'sql_norevisions' => array(
         FIELD_LOAD_CURRENT => array(
-          _field_sql_norevisions_tablename($field) => $columns,
+          _field_sql_storage_tablename($field) => $columns,
         ),
         FIELD_LOAD_REVISION => array(
-          _field_sql_norevisions_tablename($field) => $columns,
+          _field_sql_storage_tablename($field) => $columns,
         ),
       ),
     );
