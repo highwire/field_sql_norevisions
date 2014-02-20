@@ -1,10 +1,10 @@
 <?php
 
 /**
- * @file
- * Default implementation of the field storage API.
+ * Implements hook_field_storage_info_alter().
+ * 
+ * We override field_sql_storage's module pointer to point to ourself (field_sql_norevisions) so we can override all relevant functions.
  */
-
 function field_sql_norevisions_field_storage_info_alter(&$info) {
   $info['field_sql_storage']['module'] = 'field_sql_norevisions';
 }
